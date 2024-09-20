@@ -1,7 +1,10 @@
 package com.codigo.Gestion.Usuarios.controller;
 
 
+import com.codigo.Gestion.Usuarios.aggregates.request.SignInRequest;
 import com.codigo.Gestion.Usuarios.aggregates.request.SignUpRequest;
+import com.codigo.Gestion.Usuarios.aggregates.response.BaseResponse;
+import com.codigo.Gestion.Usuarios.aggregates.response.SignInResponse;
 import com.codigo.Gestion.Usuarios.entity.UsuarioEntity;
 import com.codigo.Gestion.Usuarios.service.AuthenticationService;
 import lombok.RequiredArgsConstructor;
@@ -14,7 +17,7 @@ import java.util.List;
  * Controlador para la autenticación de usuarios.
  */
 @RestController
-@RequestMapping("api/v1/users/")
+@RequestMapping("api/v1/authentication/")
 @RequiredArgsConstructor
 public class AuthController {
     private final AuthenticationService authenticationService;
@@ -27,7 +30,7 @@ public class AuthController {
      * @return Respuesta con la entidad del usuario registrado.
      */
     @PostMapping("/signupuser")
-    public ResponseEntity<UsuarioEntity> signUpUser(@RequestBody SignUpRequest signUpRequest) {
+    public ResponseEntity<BaseResponse> signUpUser(@RequestBody SignUpRequest signUpRequest) {
         return ResponseEntity.ok(authenticationService.signUpUser(signUpRequest));
     }
 
@@ -38,7 +41,13 @@ public class AuthController {
      * @return Respuesta con la entidad del administrador registrado.
      */
     @PostMapping("/signupadmin")
-    public ResponseEntity<UsuarioEntity> signUpAdmin(@RequestBody SignUpRequest signUpRequest) {
+    public ResponseEntity<BaseResponse> signUpAdmin(@RequestBody SignUpRequest signUpRequest) {
         return ResponseEntity.ok(authenticationService.signUpAdmin(signUpRequest));
     }
+
+    @PostMapping("/signin")
+    public ResponseEntity<SignInResponse> signin(@RequestBody SignInRequest signInRequest){
+        return ResponseEntity.ok(authenticationService.signIn(signInRequest));
+    }
+
 }

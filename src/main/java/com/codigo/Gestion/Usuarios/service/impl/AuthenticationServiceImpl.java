@@ -1,8 +1,11 @@
 package com.codigo.Gestion.Usuarios.service.impl;
 
 import com.codigo.Gestion.Usuarios.aggregates.constants.Constants;
+import com.codigo.Gestion.Usuarios.aggregates.request.SignInRequest;
 import com.codigo.Gestion.Usuarios.aggregates.request.SignUpRequest;
+import com.codigo.Gestion.Usuarios.aggregates.response.BaseResponse;
 import com.codigo.Gestion.Usuarios.aggregates.response.ReniecResponse;
+import com.codigo.Gestion.Usuarios.aggregates.response.SignInResponse;
 import com.codigo.Gestion.Usuarios.client.ReniecClient;
 import com.codigo.Gestion.Usuarios.entity.RolEntity;
 import com.codigo.Gestion.Usuarios.entity.Role;
@@ -10,70 +13,91 @@ import com.codigo.Gestion.Usuarios.entity.UsuarioEntity;
 import com.codigo.Gestion.Usuarios.repository.RolRepository;
 import com.codigo.Gestion.Usuarios.repository.UsuarioRepository;
 import com.codigo.Gestion.Usuarios.service.AuthenticationService;
+import com.codigo.Gestion.Usuarios.service.JwtService;
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.beans.factory.annotation.Value;
 import java.util.*;
 
 @Service
+@RequiredArgsConstructor
 public class AuthenticationServiceImpl implements AuthenticationService {
     private final UsuarioRepository usuarioRepository;
     private final RolRepository rolRepository;
     private final ReniecClient reniecClient;
+    private final JwtService jwtService;
+    private final AuthenticationManager authenticationManager;
     @Value("${token.api}")
     private String tokenapi;
 
-    public AuthenticationServiceImpl(UsuarioRepository usuarioRepository, ReniecClient reniecClient,RolRepository rolRepository) {
-        this.usuarioRepository = usuarioRepository;
-        this.reniecClient = reniecClient;
-        this.rolRepository = rolRepository;
-    }
 
     /**
      * Registra un nuevo usuario con rol estándar.
-     *
-     * @param signUpRequest Objeto que contiene los datos del usuario a registrar.
-     * @return UsuarioEntity registrado con rol de usuario.
      */
     @Override
     @Transactional
-    public UsuarioEntity signUpUser(SignUpRequest signUpRequest) {
-        UsuarioEntity usuario = getEntity(signUpRequest);
+    public BaseResponse signUpUser(SignUpRequest signUpRequest) {
+        BaseResponse response = new BaseResponse();
 
-        //ASIGNADO FINALMENTE EL ROL ENCONTRADO AL USUARIO:
-        usuario.setRoles(Collections.singleton(getRoles(Role.USER)));
-        usuario.setIsEnabled(Constants.ESTADO_ACTIVO);
-        usuario.setEmail(signUpRequest.getEmail());
-        usuario.setPassword(signUpRequest.getPassword());
-        return usuarioRepository.save(usuario);
+        try {
+            UsuarioEntity usuario = getEntity(signUpRequest);
+            usuario.setRoles(Collections.singleton(getRoles(Role.USER)));
+            usuario.setIsEnabled(Constants.ESTADO_ACTIVO);
+            usuario.setEmail(signUpRequest.getEmail());
+            usuario.setPassword(new BCryptPasswordEncoder().encode(signUpRequest.getPassword()));
+
+            UsuarioEntity savedUsuario = usuarioRepository.save(usuario);
+
+            response.setCode(Constants.OK_DNI_CODE); // Código de éxito
+            response.setMessage("Usuario registrado exitosamente");
+            response.setData(Optional.of(savedUsuario));
+        } catch (Exception e) {
+            response.setCode(Constants.ERROR_DNI_CODE); // Código de error
+            response.setMessage("Error al registrar el usuario: " + e.getMessage());
+            response.setData(Optional.empty());
+        }
+        return response;
     }
 
     /**
      * Registra un nuevo usuario con rol de administrador.
-     *
-     * @param signUpRequest Objeto que contiene los datos del usuario a registrar.
-     * @return UsuarioEntity registrado con rol de administrador.
      */
     @Override
     @Transactional
-    public UsuarioEntity signUpAdmin(SignUpRequest signUpRequest) {
-        UsuarioEntity admin = getEntity(signUpRequest);
-        admin.setIsEnabled(Constants.ESTADO_ACTIVO);
-        admin.setEmail(signUpRequest.getEmail());
-        admin.setRoles(Collections.singleton(getRoles(Role.ADMIN)));
-        admin.setPassword(new BCryptPasswordEncoder().encode(signUpRequest.getPassword()));
-        return usuarioRepository.save(admin);
+    public BaseResponse signUpAdmin(SignUpRequest signUpRequest) {
+        BaseResponse response = new BaseResponse();
+
+        try {
+            UsuarioEntity admin = getEntity(signUpRequest);
+            admin.setRoles(Collections.singleton(getRoles(Role.ADMIN)));
+            admin.setIsEnabled(Constants.ESTADO_ACTIVO);
+            admin.setEmail(signUpRequest.getEmail());
+            admin.setPassword(new BCryptPasswordEncoder().encode(signUpRequest.getPassword()));
+
+            // Guardar el admin en la base de datos
+            UsuarioEntity savedAdmin = usuarioRepository.save(admin);
+
+            // Crear la respuesta de éxito
+            response.setCode(Constants.OK_DNI_CODE); // Código de éxito
+            response.setMessage("Administrador registrado exitosamente");
+            response.setData(Optional.of(savedAdmin));
+
+        } catch (Exception e) {
+            response.setCode(Constants.ERROR_DNI_CODE);
+            response.setMessage("Error al registrar el administrador: " + e.getMessage());
+            response.setData(Optional.empty());
+        }
+
+        return response;
     }
 
 
     /**
      * Obtiene el rol de usuario desde el repositorio.
-     *
-     * @param rolBuscado Rol buscado (USER o ADMIN).
-     * @return RolEntity correspondiente.
-     * @throws RuntimeException si el rol no se encuentra.
      */
     private RolEntity getRoles(Role rolBuscado){
         return rolRepository.findByNombreRol(rolBuscado.name())
@@ -83,9 +107,6 @@ public class AuthenticationServiceImpl implements AuthenticationService {
 
     /**
      * Ejecuta una consulta al servicio de Reniec para obtener datos de un usuario a partir de su documento.
-     *
-     * @param documento Número de documento del usuario.
-     * @return ReniecResponse con los datos del usuario.
      */
     private ReniecResponse executionReniec(String documento){
         String auth = "Bearer "+tokenapi;
@@ -95,14 +116,10 @@ public class AuthenticationServiceImpl implements AuthenticationService {
 
     /**
      * Crea una entidad de usuario utilizando los datos obtenidos de Reniec.
-     *
-     * @param personaRequest Objeto que contiene los datos básicos del usuario.
-     * @return UsuarioEntity creado a partir de los datos de Reniec.
      */
     private UsuarioEntity getEntity(SignUpRequest personaRequest){
         UsuarioEntity personaEntity = new UsuarioEntity();
 
-        //Ejecutar la consulta;
         ReniecResponse response = executionReniec(personaRequest.getNumeroDocumento());
         if (Objects.nonNull(response)){
             personaEntity.setNombres(response.getNombres());
@@ -117,5 +134,16 @@ public class AuthenticationServiceImpl implements AuthenticationService {
         return null;
     }
 
+    @Override
+    public SignInResponse signIn(SignInRequest signInRequest) {
+        authenticationManager.authenticate(new UsernamePasswordAuthenticationToken(
+                signInRequest.getEmail(),signInRequest.getPassword()));
+        var user = usuarioRepository.findByEmail(signInRequest.getEmail())
+                .orElseThrow(()-> new IllegalArgumentException("ERROR USUARIO NO ENCONTRADO"));
+        var token = jwtService.generateToken(user);
+        SignInResponse response = new SignInResponse();
+        response.setToken(token);
+        return response;
+    }
 
 }

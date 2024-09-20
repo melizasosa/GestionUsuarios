@@ -2,6 +2,7 @@ package com.codigo.Gestion.Usuarios.service.impl;
 
 import com.codigo.Gestion.Usuarios.aggregates.constants.Constants;
 import com.codigo.Gestion.Usuarios.aggregates.request.SignUpRequest;
+import com.codigo.Gestion.Usuarios.aggregates.response.BaseResponse;
 import com.codigo.Gestion.Usuarios.client.ReniecClient;
 import com.codigo.Gestion.Usuarios.entity.UsuarioEntity;
 import com.codigo.Gestion.Usuarios.exception.ResourceNotFoundException;
@@ -12,6 +13,9 @@ import com.codigo.Gestion.Usuarios.util.Util;
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.security.core.userdetails.UserDetails;
+import org.springframework.security.core.userdetails.UserDetailsService;
+import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -24,47 +28,67 @@ import java.util.Optional;
 @Service
 @RequiredArgsConstructor
 public class UsuarioServicioImpl implements UsuarioService {
+
     private final UsuarioRepository usuarioRepository;
     private final RedisService redisService;
-    private final ReniecClient reniecClient;
 
-    // Inyectar el token de API desde el archivo de configuración
     @Value("${token.api}")
     private String tokenapi;
+
+    @Override
+    public UserDetailsService userDetailsService() {
+        return new UserDetailsService() {
+            @Override
+            public UserDetails loadUserByUsername(String username)
+                    throws UsernameNotFoundException {
+                return usuarioRepository.findByEmail(username).orElseThrow(
+                        ()-> new UsernameNotFoundException("USUARIO NO ENCONTRADO"));
+            }
+        };
+    }
 
     /**
      * Obtiene un usuario por su número de documento (DNI).
      * Primero busca en Redis y, si no lo encuentra, lo busca en la base de datos.
-     *
-     * @param dni Número de documento del usuario.
-     * @return UsuarioEntity encontrado por su DNI.
      */
     @Override
-    public UsuarioEntity getUserByDni(String dni) {
-       /* return usuarioRepository.findByNumeroDocumento(dni)
-                .orElseThrow(() -> new RuntimeException("Usuario no encontrado con DNI: " + dni));*/
+    public BaseResponse getUserByDni(String dni) {
 
-        String redisKey = Constants.REDIS_KEY_API_PERSON + dni;
+        BaseResponse response = new BaseResponse();
 
-        // Obtener datos de Redis
-        Optional<UsuarioEntity> cachedUser = obtenerUsuarioDesdeRedis(redisKey);
-        if (cachedUser.isPresent()) {
-            return cachedUser.get();
+        try {
+            String redisKey = Constants.REDIS_KEY_API_PERSON + dni;
+
+            // Obtener datos de Redis
+            Optional<UsuarioEntity> cachedUser = obtenerUsuarioDesdeRedis(redisKey);
+            if (cachedUser.isPresent()) {
+                response.setCode(Constants.OK_DNI_CODE); // Código de éxito
+                response.setMessage("Usuario encontrado en caché Redis");
+                response.setData(Optional.of(cachedUser.get()));
+                return response;
+            }
+
+            // Obtener datos de la base de datos si no están en Redis
+            UsuarioEntity usuario = obtenerUsuarioDesdeBaseDeDatos(dni);
+
+            // Almacenar datos en Redis para futuras consultas
+            almacenarUsuarioEnRedis(redisKey, usuario);
+            response.setCode(Constants.OK_DNI_CODE); // Código de éxito
+            response.setMessage("Usuario encontrado en la base de datos");
+            response.setData(Optional.of(usuario));
+
+        } catch (Exception e) {
+            // Manejar cualquier error inesperado
+            response.setCode(Constants.ERROR_DNI_CODE); // Código de error
+            response.setMessage("Error al buscar el usuario: " + e.getMessage());
+            response.setData(Optional.empty());
         }
 
-        // Obtener datos de la base de datos si no están en Redis
-        UsuarioEntity usuario = obtenerUsuarioDesdeBaseDeDatos(dni);
-
-        // Almacenar datos en Redis para futuras consultas
-        almacenarUsuarioEnRedis(redisKey, usuario);
-
-        return usuario;
+        return response;
     }
 
     /**
      * Obtiene todos los usuarios activos de la base de datos.
-     *
-     * @return Lista de todas las entidades de usuario activas.
      */
     @Override
     public List<UsuarioEntity> getAllUsers() {
@@ -74,15 +98,12 @@ public class UsuarioServicioImpl implements UsuarioService {
 
     /**
      * Actualiza los detalles de un usuario existente.
-     *
-     * @param id            ID del usuario a actualizar.
-     * @param signUpRequest Objeto con los datos actualizados del usuario.
-     * @return UsuarioEntity actualizado.
-     * @throws IllegalArgumentException si los datos proporcionados no son válidos.
      */
     @Override
     @Transactional
-    public UsuarioEntity updateUser(Long id, SignUpRequest signUpRequest) {
+    public BaseResponse updateUser(Long id, SignUpRequest signUpRequest) {
+
+        BaseResponse response = new BaseResponse();
 
         // Validar los datos proporcionados
         if (id == null || signUpRequest == null || signUpRequest.getEmail() == null || signUpRequest.getNumeroDocumento() == null) {
@@ -92,38 +113,42 @@ public class UsuarioServicioImpl implements UsuarioService {
         // Lógica existente para actualizar el usuario
         UsuarioEntity existingUser = usuarioRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("Usuario no encontrado con ID: " + id));
-        existingUser.setEmail(signUpRequest.getEmail());
-        existingUser.setNumeroDocumento(signUpRequest.getNumeroDocumento());
-        existingUser.setPassword(signUpRequest.getPassword());
-        existingUser.setNumeroDocumento(signUpRequest.getNumeroDocumento());
+        existingUser.setNombres(signUpRequest.getNombres());
+
         // Actualizar otros campos si es necesario
-        return usuarioRepository.save(existingUser);
+        UsuarioEntity updatedUser = usuarioRepository.save(existingUser);
+        response.setCode(Constants.OK_DNI_CODE); // Código de éxito
+        response.setMessage("Usuario actualizado exitosamente");
+        response.setData(Optional.of(updatedUser));
+
+        return response;
     }
 
 
     /**
      * Marca un usuario como deshabilitado en lugar de eliminarlo físicamente de la base de datos.
-     *
-     * @param id ID del usuario a deshabilitar.
      */
     @Override
     @Transactional
-    public void deleteUser(Long id) {
+    public BaseResponse deleteUser(Long id) {
+        BaseResponse response = new BaseResponse();
+
         UsuarioEntity existingUser = usuarioRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("Usuario no encontrado con ID: " + id));
 
         // Cambiar el estado del usuario en lugar de eliminarlo
         existingUser.setIsEnabled(false); // Marcar al usuario como deshabilitado
         usuarioRepository.save(existingUser); // Guardar el usuario con el nuevo estado
+        response.setCode(Constants.OK_DNI_CODE);
+        response.setMessage("Usuario eliminado exitosamente");
+        response.setData(Optional.of(existingUser));
+        return response;
     }
 
 
     /**
      * Obtiene un usuario desde Redis utilizando una clave.
-     *
-     * @param redisKey Clave de Redis para buscar los datos del usuario.
-     * @return UsuarioEntity obtenido de Redis, si está presente.
-     */
+    */
     private Optional<UsuarioEntity> obtenerUsuarioDesdeRedis(String redisKey) {
         String cachedUserInfo = redisService.getDataDesdeRedis(redisKey);
         if (Objects.nonNull(cachedUserInfo)) {
@@ -134,11 +159,7 @@ public class UsuarioServicioImpl implements UsuarioService {
 
     /**
      * Obtiene un usuario desde la base de datos utilizando su DNI.
-     *
-     * @param dni Número de documento del usuario.
-     * @return UsuarioEntity obtenido de la base de datos.
-     * @throws ResourceNotFoundException si el usuario no se encuentra en la base de datos.
-     */
+      */
     private UsuarioEntity obtenerUsuarioDesdeBaseDeDatos(String dni) {
         return usuarioRepository.findByNumeroDocumento(dni)
                 .orElseThrow(() -> new ResourceNotFoundException("El recurso solicitado no fue encontrado. " ));
@@ -146,9 +167,6 @@ public class UsuarioServicioImpl implements UsuarioService {
 
     /**
      * Almacena los datos de un usuario en Redis para acelerar futuras consultas.
-     *
-     * @param redisKey Clave de Redis para almacenar los datos del usuario.
-     * @param usuario  Entidad del usuario a almacenar en Redis.
      */
     private void almacenarUsuarioEnRedis(String redisKey, UsuarioEntity usuario) {
         String userInfoForRedis = Util.convertirAString(usuario);

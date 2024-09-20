@@ -8,8 +8,7 @@ import java.io.IOException;
 
 public class Util {
     public static String convertirAString(Object obj) {
-        // Usa una librería como Jackson o Gson para convertir el objeto a JSON
-        ObjectMapper mapper = new ObjectMapper();
+            ObjectMapper mapper = new ObjectMapper();
         try {
             return mapper.writeValueAsString(obj);
         } catch (JsonProcessingException e) {
@@ -19,8 +18,7 @@ public class Util {
     }
 
     public static <T> T convertirDesdeString(String json, Class<T> clazz) {
-        // Usa una librería como Jackson o Gson para convertir JSON a objeto
-        ObjectMapper mapper = new ObjectMapper();
+          ObjectMapper mapper = new ObjectMapper();
         try {
             return mapper.readValue(json, clazz);
         } catch (IOException e) {

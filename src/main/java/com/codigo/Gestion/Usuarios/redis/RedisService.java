@@ -11,16 +11,16 @@ import java.util.concurrent.TimeUnit;
 public class RedisService {
     private final StringRedisTemplate redisTemplate;
 
-    public void guardarEnRedis(String key, String value, int exp){
-        redisTemplate.opsForValue().set(key,value);
-        redisTemplate.expire(key,exp, TimeUnit.MINUTES);
+    public void guardarEnRedis(String key, String value, int exp) {
+        redisTemplate.opsForValue().set(key, value);
+        redisTemplate.expire(key, exp, TimeUnit.MINUTES);
     }
 
-    public String getDataDesdeRedis(String key){
+    public String getDataDesdeRedis(String key) {
         return redisTemplate.opsForValue().get(key);
     }
 
-    public void borrarData(String key){
+    public void borrarData(String key) {
         redisTemplate.delete(key);
     }
 }
